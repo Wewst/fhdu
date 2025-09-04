@@ -4462,7 +4462,7 @@
 
 <script>
 // 🌍 URL твоего бэкенда
-const BACKEND_URL = "https://telegram-app-9.onrender.com/";
+const BACKEND_URL = "https://telegram-app-10.onrender.com/";
 
 
 // ======================== //
@@ -4610,13 +4610,12 @@ async function loadCartFromBackend(telegramId) {
         const response = await fetch(`${BACKEND_URL}/cart/${telegramId}`);
         if (response.ok) {
             const cartItems = await response.json();
-            // Используем существующую переменную cart
-            cart.length = 0; // Очищаем массив
-            cart.push(...cartItems); // Заполняем данными с сервера
-            console.log("🛒 Cart loaded from backend:", cart.length, "items");
-        } else {
-            console.log("🛒 No cart found on backend, starting with empty cart");
-            cart.length = 0; // Очищаем массив
+            // Очищаем и заполняем существующий массив cart
+            cart.length = 0;
+            if (Array.isArray(cartItems)) {
+                cart.push(...cartItems);
+                console.log("🛒 Cart loaded from backend:", cart);
+            }
         }
         
         localStorage.setItem('userCart', JSON.stringify(cart));
@@ -4624,8 +4623,42 @@ async function loadCartFromBackend(telegramId) {
         
     } catch (error) {
         console.error("❌ Cart load error:", error);
-        cart.length = 0; // Очищаем массив при ошибке
+        cart.length = 0;
         localStorage.setItem('userCart', JSON.stringify([]));
+    }
+}
+
+// ======================== //
+//   ДОБАВЛЕНИЕ В КОРЗИНУ  //
+// ======================== //
+async function addToCart(productId) {
+    const product = productsData.find(p => p.id === productId);
+    
+    if (product && window.Telegram && Telegram.WebApp.initDataUnsafe?.user) {
+        // Проверяем, есть ли товар уже в корзине
+        const existingItemIndex = cart.findIndex(item => item.productId === productId);
+        
+        if (existingItemIndex >= 0) {
+            // Увеличиваем количество существующего товара
+            cart[existingItemIndex].quantity += 1;
+        } else {
+            // Добавляем новый товар
+            cart.push({
+                productId: product.id,
+                name: product.title,
+                price: product.price,
+                quantity: 1,
+                image: product.image,
+                addedAt: new Date().toISOString()
+            });
+        }
+        
+        // Сохраняем ВСЮ корзину на сервер
+        await saveCartToBackend();
+        updateCartIconCount();
+        
+        showToast('Товар добавлен в корзину!');
+        triggerVibration();
     }
 }
 
@@ -4644,13 +4677,14 @@ async function saveCartToBackend() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 telegramId: telegramId,
-                cart: cart, // Используем существующую переменную
+                cart: cart,
                 totalPrice: calculateTotalPrice()
             })
         });
 
         if (response.ok) {
-            console.log("✅ Cart saved to backend");
+            console.log("✅ Cart saved to backend:", cart);
+            localStorage.setItem('userCart', JSON.stringify(cart));
         } else {
             console.error("❌ Cart save failed");
         }
@@ -4661,186 +4695,71 @@ async function saveCartToBackend() {
 }
 
 // ======================== //
-//   РАБОТА С КОРЗИНОЙ     //
+//   УДАЛЕНИЕ ИЗ КОРЗИНЫ   //
 // ======================== //
-
-// Расчет общей стоимости
-function calculateTotalPrice() {
-    return cart.reduce((total, item) => total + (item.price * item.quantity), 0);
-}
-
-// Обновление отображения корзины
-function updateCartDisplay() {
-    console.log("🛒 Cart updated:", cart);
+async function removeFromCart(productId, removeCompletely = false) {
+    const index = cart.findIndex(item => item.productId === productId);
     
-    // Сохраняем в localStorage для быстрого доступа
-    localStorage.setItem('userCart', JSON.stringify(cart));
-    updateCartIconCount();
-    
-    // Автоматически сохраняем на сервер при изменении
-    saveCartToBackend();
-}
-
-// Добавление в корзину
-async function addToCart(productId) {
-    const product = productsData.find(p => p.id === productId);
-    
-    if (product && window.Telegram && Telegram.WebApp.initDataUnsafe?.user) {
-        // Проверяем, есть ли товар уже в корзине
-        const existingItem = cart.find(item => item.productId === productId);
-        
-        if (existingItem) {
-            existingItem.quantity += 1;
+    if (index !== -1) {
+        if (!removeCompletely && cart[index].quantity > 1) {
+            cart[index].quantity -= 1;
         } else {
-            cart.push({
-                productId: product.id,
-                name: product.title,
-                price: product.price,
-                quantity: 1,
-                image: product.image
-            });
+            cart.splice(index, 1);
         }
         
-        // Обновляем отображение
-        updateCartDisplay();
+        // Сохраняем ВСЮ корзину на сервер
+        await saveCartToBackend();
+        updateCartIconCount();
         
-        showToast('Товар добавлен в корзину!');
-        triggerVibration();
+        showToast('Товар удален из корзины');
     }
 }
 
-// Очистка корзины
+// ======================== //
+//   ОЧИСТКА КОРЗИНЫ       //
+// ======================== //
 async function clearCart() {
-    cart.length = 0; // Очищаем существующий массив
-    
-    // Обновляем отображение
-    updateCartDisplay();
+    cart.length = 0;
     
     // Очищаем на сервере
     await clearCartOnBackend();
+    localStorage.setItem('userCart', JSON.stringify([]));
+    updateCartIconCount();
     
     showToast('Корзина очищена');
 }
-// ======================== //
-//   ЗАГРУЗКА КОРЗИНЫ      //
-// ======================== //
-async function loadCartFromBackend(telegramId) {
-    try {
-        const response = await fetch(`${BACKEND_URL}/cart/${telegramId}`);
-        if (response.ok) {
-            const cartItems = await response.json();
-            // Используем существующую переменную cart
-            cart.length = 0; // Очищаем массив
-            cart.push(...cartItems); // Заполняем данными с сервера
-            console.log("🛒 Cart loaded from backend:", cart.length, "items");
-        } else {
-            console.log("🛒 No cart found on backend, starting with empty cart");
-            cart.length = 0; // Очищаем массив
-        }
-        
-        localStorage.setItem('userCart', JSON.stringify(cart));
-        updateCartIconCount();
-        
-    } catch (error) {
-        console.error("❌ Cart load error:", error);
-        cart.length = 0; // Очищаем массив при ошибке
-        localStorage.setItem('userCart', JSON.stringify([]));
-    }
-}
 
 // ======================== //
-//   СОХРАНЕНИЕ КОРЗИНЫ    //
+//   ОЧИСТКА КОРЗИНЫ НА СЕРВЕРЕ  //
 // ======================== //
-async function saveCartToBackend() {
+async function clearCartOnBackend() {
     try {
         const user = Telegram.WebApp.initDataUnsafe?.user;
         if (!user) return;
 
         const telegramId = user.id.toString();
         
-        const response = await fetch(`${BACKEND_URL}/cart/save`, {
+        const response = await fetch(`${BACKEND_URL}/cart/clear`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                telegramId: telegramId,
-                cart: cart, // Используем существующую переменную
-                totalPrice: calculateTotalPrice()
-            })
+            body: JSON.stringify({ telegramId: telegramId })
         });
 
         if (response.ok) {
-            console.log("✅ Cart saved to backend");
-        } else {
-            console.error("❌ Cart save failed");
+            console.log("✅ Cart cleared on backend");
         }
         
     } catch (error) {
-        console.error("❌ Save cart error:", error);
+        console.error("❌ Clear cart error:", error);
     }
 }
 
 // ======================== //
-//   РАБОТА С КОРЗИНОЙ     //
+//   РАСЧЕТ СУММЫ КОРЗИНЫ  //
 // ======================== //
-
-// Расчет общей стоимости
 function calculateTotalPrice() {
     return cart.reduce((total, item) => total + (item.price * item.quantity), 0);
 }
-
-// Обновление отображения корзины
-function updateCartDisplay() {
-    console.log("🛒 Cart updated:", cart);
-    
-    // Сохраняем в localStorage для быстрого доступа
-    localStorage.setItem('userCart', JSON.stringify(cart));
-    updateCartIconCount();
-    
-    // Автоматически сохраняем на сервер при изменении
-    saveCartToBackend();
-}
-
-// Добавление в корзину
-async function addToCart(productId) {
-    const product = productsData.find(p => p.id === productId);
-    
-    if (product && window.Telegram && Telegram.WebApp.initDataUnsafe?.user) {
-        // Проверяем, есть ли товар уже в корзине
-        const existingItem = cart.find(item => item.productId === productId);
-        
-        if (existingItem) {
-            existingItem.quantity += 1;
-        } else {
-            cart.push({
-                productId: product.id,
-                name: product.title,
-                price: product.price,
-                quantity: 1,
-                image: product.image
-            });
-        }
-        
-        // Обновляем отображение
-        updateCartDisplay();
-        
-        showToast('Товар добавлен в корзину!');
-        triggerVibration();
-    }
-}
-
-// Очистка корзины
-async function clearCart() {
-    cart.length = 0; // Очищаем существующий массив
-    
-    // Обновляем отображение
-    updateCartDisplay();
-    
-    // Очищаем на сервере
-    await clearCartOnBackend();
-    
-    showToast('Корзина очищена');
-}
-
 
 // ======================== //
 //   ОБНОВЛЕНИЕ СЧЕТЧИКА   //
